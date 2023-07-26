@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Use this share-session script in your tmux config to ease multi-user pairing,
+# like this:
+# set-option -g status-interval 5
+# set-option -g status-right '#(/home/chouser/repos/tmux-multiuser/share-session go+rwx go+rw) | "#{pane_title}" #(date +"%H:%M %d-%b-%Y")'
+
+# Set socket dir and socket permissions
+chmod "$1" "${TMUX%/*}"
+chmod "$2" "${TMUX%%,*}"
+
+# User list:
+echo $(stat -c %U $(tmux list-clients -F '#{client_name}'))

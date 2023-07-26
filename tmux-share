@@ -1,0 +1,32 @@
+#!/usr/bin/env bb
+(ns tmux-share
+  (:require [clojure.java.io :as io])
+  (:import (java.io File)
+           (java.nio.file Files Path LinkOption)
+           (java.nio.file.attribute PosixFilePermission)))
+
+(defprotocol Pathable
+  (^Path to-path [_]))
+
+(extend-protocol Pathable
+  String (to-path [s] (.toPath (io/file s)))
+  File   (to-path [f] (.toPath f))
+  Path   (to-path [p] p))
+
+(defn fix-permissions [path]
+  (let [path (to-path path)
+        ps (Files/getPosixFilePermissions
+            path (into-array LinkOption []))
+        dir? (Files/isDirectory path (into-array LinkOption []))]
+    (if (and (contains? ps PosixFilePermission/OTHERS_READ)
+             (if dir?
+               (contains? ps PosixFilePermission/OTHERS_EXECUTE)
+               (contains? ps PosixFilePermission/OTHERS_WRITE)))
+      :ok
+      (let [new-ps (conj (set ps)
+                         PosixFilePermission/OTHERS_READ
+                         (if dir?
+                           PosixFilePermission/OTHERS_EXECUTE
+                           PosixFilePermission/OTHERS_WRITE))]
+        (Files/setPosixFilePermissions path new-ps)
+        (recur (.getParent path))))))
