@@ -1,6 +1,7 @@
 #!/usr/bin/env bb
 (ns tmux-share
-  (:require [clojure.java.io :as io])
+  (:require [clojure.java.io :as io]
+            [babashka.cli :as cli])
   (:import (java.io File)
            (java.nio.file Files Path LinkOption)
            (java.nio.file.attribute PosixFilePermission)))
@@ -30,3 +31,58 @@
                            PosixFilePermission/OTHERS_WRITE))]
         (Files/setPosixFilePermissions path new-ps)
         (recur (.getParent path))))))
+
+;;;;; cli parsing
+
+(defn socket-path [opts]
+  (or (:socket-path opts)
+      (some->> (System/getenv "TMUX") (re-find #"^[^,]+"))
+      (throw (ex-info "Must specify --socket-path"
+                      {:TMUX (System/getenv "TMUX")
+                       :opts opts}))))
+
+(declare cli-table)
+
+(defn help
+  "Print this usage message"
+  [& _]
+  (println "USAGE: tmux-share <command> <options>")
+  (println "COMMANDS:")
+  (->> cli-table
+       (run! (fn [{:keys [cmds fn]}]
+               (println " " (or (first cmds) "help") ":" (:doc (meta fn))))))
+  (println "OPTIONS:")
+  (println "  -S  --socket-path  Path to tmux server socket, often like /tmp/tmux-1001/default")
+  (println "                     Defaults to the current socket when run from inside tmux"))
+
+(defn cmd-fix-permissions
+  "Allow other users to attach to and control a running tmux server"
+  [{:keys [opts]}]
+  (if (:help opts)
+    (help)
+    (fix-permissions (socket-path opts))))
+
+(defn set-status-left [{:keys [opts]}]
+  (prn :tbd 'set-status-left opts))
+
+(defn list-users [{:keys [opts]}]
+  (prn :tbd 'list-users opts))
+
+(defn new-session [{:keys [opts]}]
+  (prn :tbd 'new-session opts))
+
+(def cli-table
+  [{:cmds ["fix-permissions"] :fn #'cmd-fix-permissions}
+   {:cmds ["set-status-left"] :fn #'set-status-left}
+   {:cmds ["list-users"]      :fn #'list-users}
+   {:cmds ["new-session"]     :fn #'new-session}
+   {:cmds []                  :fn #'help}])
+
+(defn main [& args]
+  (cli/dispatch cli-table args {:alias {:S :socket-path}}))
+
+#_(main "fix-permissions" "-S" "/tmp/tmux-1000/default")
+(main "new-session" "-S" "/tmp/tmux-1000/default")
+
+#_
+(apply main *command-line-args*)
