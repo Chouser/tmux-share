@@ -1,10 +1,22 @@
 #!/usr/bin/env bb
 (ns tmux-share
-  (:require [clojure.java.io :as io]
-            [babashka.cli :as cli])
+  (:require [babashka.cli :as cli]
+            [clojure.java.io :as io]
+            [clojure.java.shell :refer [sh]]
+            [clojure.string :as str])
   (:import (java.io File)
            (java.nio.file Files Path LinkOption)
            (java.nio.file.attribute PosixFilePermission)))
+
+(defn tmux [socket-path & cmds]
+  (when-not socket-path
+    (ex-info "Must specify --socket-path" {:TMUX (System/getenv "TMUX")}))
+  (let [{:keys [exit out err] :as result}
+        , (sh "tmux" "-S" socket-path "source" "-"
+              :in (apply str (mapcat list cmds (repeat "\n"))))]
+    (if (zero? exit)
+      (re-seq #".+" out)
+      (throw (ex-info err result)))))
 
 (defprotocol Pathable
   (^Path to-path [_]))
@@ -14,11 +26,12 @@
   File   (to-path [f] (.toPath f))
   Path   (to-path [p] p))
 
-(defn fix-permissions [path]
-  (let [path (to-path path)
-        ps (Files/getPosixFilePermissions
-            path (into-array LinkOption []))
-        dir? (Files/isDirectory path (into-array LinkOption []))]
+(def follow-links (into-array LinkOption []))
+
+(defn fix-permissions [{:keys [socket-path]}]
+  (let [path (to-path socket-path)
+        ps (Files/getPosixFilePermissions path follow-links)
+        dir? (Files/isDirectory path follow-links)]
     (if (and (contains? ps PosixFilePermission/OTHERS_READ)
              (if dir?
                (contains? ps PosixFilePermission/OTHERS_EXECUTE)
@@ -32,57 +45,66 @@
         (Files/setPosixFilePermissions path new-ps)
         (recur (.getParent path))))))
 
-;;;;; cli parsing
+(defn set-status-left [{:keys [socket-path user tmux-share]}]
+  (when-not tmux-share
+    (throw (ex-info "Don't know how to invoke self" {})))
+  (tmux socket-path
+        (str "set-option -g status-left '" user " #(" tmux-share " list-users) '")
+        "set-option -g status-left-length 50"
+        "set-option -g status-interval 5")
+  :ok)
 
-(defn socket-path [opts]
-  (or (:socket-path opts)
-      (some->> (System/getenv "TMUX") (re-find #"^[^,]+"))
-      (throw (ex-info "Must specify --socket-path"
-                      {:TMUX (System/getenv "TMUX")
-                       :opts opts}))))
+(defn list-users [{:keys [socket-path user]}]
+  (->> (tmux socket-path
+             "list-clients -F '#{client_name}'")
+       (map #(str (Files/getOwner (to-path %) follow-links)))
+       (remove #(= % user))
+       sort))
+
+(defn new-session [])
+
+;;;;; cli parsing
 
 (declare cli-table)
 
-(defn help
-  "Print this usage message"
-  [& _]
+(defn help [_]
   (println "USAGE: tmux-share <command> <options>")
   (println "COMMANDS:")
   (->> cli-table
-       (run! (fn [{:keys [cmds fn]}]
-               (println " " (or (first cmds) "help") ":" (:doc (meta fn))))))
+       (run! (fn [{:keys [cmds fn doc]}]
+               (println (format "  %-16s %s" (or (first cmds) "help") doc)))))
   (println "OPTIONS:")
+  (println "      --user         Username to show in bottom-left corner and exclude from user list")
+  (println "      --tmux-share   Full path to this program; used in dynamic status line")
   (println "  -S  --socket-path  Path to tmux server socket, often like /tmp/tmux-1001/default")
   (println "                     Defaults to the current socket when run from inside tmux"))
 
-(defn cmd-fix-permissions
-  "Allow other users to attach to and control a running tmux server"
-  [{:keys [opts]}]
-  (if (:help opts)
-    (help)
-    (fix-permissions (socket-path opts))))
-
-(defn set-status-left [{:keys [opts]}]
-  (prn :tbd 'set-status-left opts))
-
-(defn list-users [{:keys [opts]}]
-  (prn :tbd 'list-users opts))
-
-(defn new-session [{:keys [opts]}]
-  (prn :tbd 'new-session opts))
+(defn cmd [f]
+  (fn [{:keys [opts] :as parsed}]
+    (if (:help opts)
+      (help opts)
+      (println (f opts)))))
 
 (def cli-table
-  [{:cmds ["fix-permissions"] :fn #'cmd-fix-permissions}
-   {:cmds ["set-status-left"] :fn #'set-status-left}
-   {:cmds ["list-users"]      :fn #'list-users}
-   {:cmds ["new-session"]     :fn #'new-session}
-   {:cmds []                  :fn #'help}])
+  [{:doc "Allow other users to attach to and control a running tmux server"
+    :cmds ["fix-permissions"] :fn (cmd fix-permissions)}
+   {:doc "Set status-left to show session owner's name and names of connected users"
+    :cmds ["set-status-left"] :fn (cmd set-status-left)}
+   {:doc "Print space-separated list of all users connected to a session"
+    :cmds ["list-users"]      :fn (cmd list-users)}
+   {:doc "Create a new shareable session. If no socket-path is specified, creates a new socket"
+    :cmds ["new"]             :fn (cmd new-session)}
+   {:doc "Print this usage message"
+    :cmds []                  :fn (cmd help)}])
+
+(defn defaults []
+  {:user (System/getenv "USER")
+   :socket-path (some->> (System/getenv "TMUX") (re-find #"^[^,]+"))
+   :tmux-share (System/getProperty "babashka.file")})
 
 (defn main [& args]
-  (cli/dispatch cli-table args {:alias {:S :socket-path}}))
+  (cli/dispatch cli-table args {:alias {:S :socket-path}
+                                :exec-args (defaults)}))
 
-#_(main "fix-permissions" "-S" "/tmp/tmux-1000/default")
-(main "new-session" "-S" "/tmp/tmux-1000/default")
-
-#_
-(apply main *command-line-args*)
+(when (= *file* (System/getProperty "babashka.file"))
+  (apply main *command-line-args*))
