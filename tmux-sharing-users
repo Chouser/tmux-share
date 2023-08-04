@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Use this share-session script in your tmux config to ease multi-user pairing,
+# like this:
+# set-option -g status-interval 10
+# set-option -g status-left-length 50
+# set-option -g status-left '#{user} #(/usr/local/bin/tmux-sharing-users)'
+
+path="${TMUX%,*,*}"
+
+allow-dir() {
+    if [ "$USER" == $(stat -c%U "$1") ]; then
+        allow-dir $(dirname "$1")
+        chmod a+x "$1"
+    fi
+}
+
+if [ "666" != $(stat -c%a "$path") ]; then
+    allow-dir $(dirname "$path")
+    chmod 666 "$path"
+fi
+
+ln -fs "$path" "/tmp/tmux-$USER-$(basename "$path")"
+
+echo \($(stat -c %U $(tmux list-clients -F '#{client_name}') | grep -v $USER)\)
