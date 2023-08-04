@@ -6,17 +6,20 @@
             [clojure.string :as str])
   (:import (java.io File)
            (java.nio.file Files Path LinkOption)
-           (java.nio.file.attribute PosixFilePermission)))
+           (java.nio.file.attribute PosixFilePermission FileAttribute)))
 
-(defn tmux [socket-path & cmds]
-  (when-not socket-path
-    (ex-info "Must specify --socket-path" {:TMUX (System/getenv "TMUX")}))
+(defn tmux [socket-path & args]
+  (when-not (seq socket-path)
+    (throw (ex-info "Must specify --socket-path" {:TMUX (System/getenv "TMUX")})))
   (let [{:keys [exit out err] :as result}
-        , (sh "tmux" "-S" socket-path "source" "-"
-              :in (apply str (mapcat list cmds (repeat "\n"))))]
+        , (apply sh "tmux" "-S" socket-path args)]
     (if (zero? exit)
       (re-seq #".+" out)
       (throw (ex-info err result)))))
+
+(defn tmux-source [socket-path & cmds]
+  (tmux socket-path "source" "-"
+        :in (apply str (mapcat list cmds (repeat "\n")))))
 
 (defprotocol Pathable
   (^Path to-path [_]))
@@ -32,10 +35,9 @@
   (let [path (to-path socket-path)
         ps (Files/getPosixFilePermissions path follow-links)
         dir? (Files/isDirectory path follow-links)]
-    (if (and (contains? ps PosixFilePermission/OTHERS_READ)
-             (if dir?
-               (contains? ps PosixFilePermission/OTHERS_EXECUTE)
-               (contains? ps PosixFilePermission/OTHERS_WRITE)))
+    (if (and dir?
+             (contains? ps PosixFilePermission/OTHERS_READ)
+             (contains? ps PosixFilePermission/OTHERS_EXECUTE))
       :ok
       (let [new-ps (conj (set ps)
                          PosixFilePermission/OTHERS_READ
@@ -48,20 +50,24 @@
 (defn set-status-left [{:keys [socket-path user tmux-share]}]
   (when-not tmux-share
     (throw (ex-info "Don't know how to invoke self" {})))
-  (tmux socket-path
-        (str "set-option -g status-left '" user " #(" tmux-share " list-users) '")
-        "set-option -g status-left-length 50"
-        "set-option -g status-interval 5")
+  (tmux-source socket-path
+               (str "set-option -g status-left"
+                    " '" user " #(" tmux-share " list-users) '")
+               "set-option -g status-left-length 50"
+               "set-option -g status-interval 5")
   :ok)
 
 (defn list-users [{:keys [socket-path user]}]
-  (->> (tmux socket-path
-             "list-clients -F '#{client_name}'")
+  (->> (tmux socket-path "list-clients" "-F" "#{client_name}")
        (map #(str (Files/getOwner (to-path %) follow-links)))
        (remove #(= % user))
        sort))
 
-(defn new-session [])
+(defn new-session [{:keys [socket-path user]}]
+  (let [sp (or socket-path
+               (str "/tmp/tmux-" user "/default"))]
+    (-> sp to-path .getParent (Files/createDirectories (into-array FileAttribute [])))
+    (tmux sp "new-session")))
 
 ;;;;; cli parsing
 
@@ -69,11 +75,11 @@
 
 (defn help [_]
   (println "USAGE: tmux-share <command> <options>")
-  (println "COMMANDS:")
+  (println "\nCOMMANDS:")
   (->> cli-table
        (run! (fn [{:keys [cmds fn doc]}]
                (println (format "  %-16s %s" (or (first cmds) "help") doc)))))
-  (println "OPTIONS:")
+  (println "\nOPTIONS:")
   (println "      --user         Username to show in bottom-left corner and exclude from user list")
   (println "      --tmux-share   Full path to this program; used in dynamic status line")
   (println "  -S  --socket-path  Path to tmux server socket, often like /tmp/tmux-1001/default")
