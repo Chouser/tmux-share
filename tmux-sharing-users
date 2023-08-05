@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
-# Use this share-session script in your tmux config to ease multi-user pairing,
-# like this:
-# set-option -g status-interval 10
-# set-option -g status-left-length 50
-# set-option -g status-left '#{user} #(/usr/local/bin/tmux-sharing-users)'
+# Use this tmux-sharing-users script in your tmux config to ease multi-user
+# pairing, by adding these lines to your ~/.tmux.conf:
+
+#   set-option -g status-interval 10
+#   set-option -g status-left-length 50
+#   set-option -g status-left '#{user} #(/usr/local/bin/tmux-sharing-users)'
+
+# IMPORTANT: When running 'tmux' from outside your session, you will get an
+# "unsafe permissions" error. For you or others to connect to your server, use -S:
+#   tmux -S /tmp/tmux-<username>-default attach
 
 path="${TMUX%,*,*}"
 
@@ -22,3 +27,13 @@ fi
 ln -fs "$path" "/tmp/tmux-$USER-$(basename "$path")"
 
 echo \($(stat -c %U $(tmux list-clients -F '#{client_name}') | grep -v $USER)\)
+
+# RATIONALE:
+# No need to install anything, just copy the file and update your ~/.tmux.conf
+# Once set up, it's totally automatic: all sessions are always ready to share
+# Con: Some normal tmux commands (new-session, attach) generate an "unsafe
+# permissions" error. The workaround is to use -S specifically.
+# Con: No annoucement immediately when a new user connects
+
+# ALTERNATIVES:
+# Wrap invocations of tmux with some new command (see tmix, tmux-share)
