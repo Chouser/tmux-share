@@ -4,7 +4,7 @@
 
 #   set-option -g status-interval 10
 #   set-option -g status-left-length 50
-#   set-option -g status-left '#{user} #(/usr/local/bin/tmux-share-users)'
+#   set-option -g status-left '#{user} #(/usr/local/bin/tmux-share-users) '
 
 # IMPORTANT: When running 'tmux' from outside an existing session, you will get
 # an "unsafe permissions" error. For you or others to connect to your server,
@@ -27,7 +27,7 @@ fi
 
 ln -fs "$path" "/tmp/tmux-$USER-$(basename "$path")"
 
-echo \($(stat -c %U $(tmux list-clients -F '#{client_name}') | grep -v $USER)\)
+echo \($(stat -c%U $(tmux list-clients -F '#{client_name}') | grep -v $USER)\)
 
 # RATIONALE:
 # No need to install anything, just copy the file and update your ~/.tmux.conf
