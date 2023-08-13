@@ -28,13 +28,3 @@ fi
 ln -fs "$path" "/tmp/tmux-$USER-$(basename "$path")"
 
 echo \($(stat -c%U $(tmux list-clients -F '#{client_name}') | grep -v $USER)\)
-
-# RATIONALE:
-# No need to install anything, just copy the file and update your ~/.tmux.conf
-# Once set up, it's totally automatic: all sessions are always ready to share
-# Con: Some normal tmux commands (new-session, attach) generate an "unsafe
-# permissions" error. The workaround is to use -S specifically.
-# Con: No annoucement immediately when a new user connects
-
-# ALTERNATIVES:
-# Wrap invocations of tmux with some new command (see tmix, tmux-share)
